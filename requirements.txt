@@ -1,6 +1,9 @@
+setuptools==68.2.2
+wheel==0.41.2
 flask==3.0.0
 gunicorn==21.2.0
 numpy==1.24.3
 Pillow==10.0.0
 trimesh==3.23.5
-pygltflib==1.15.8 
+pygltflib==1.15.8
+python-distutils-extra==2.39 
