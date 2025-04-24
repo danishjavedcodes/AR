@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AR Viewer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: Arial, sans-serif;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            z-index: 1000;
+        }
+        #enter-ar {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 30px;
+            background: rgba(13, 110, 253, 0.8);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: 500;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+        #enter-ar:hover {
+            background: rgba(13, 110, 253, 1);
+            transform: translateX(-50%) scale(1.05);
+        }
+        #enter-ar:active {
+            transform: translateX(-50%) scale(0.95);
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+        .loading-content {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 2rem;
+            border-radius: 10px;
+            text-align: center;
+            max-width: 90%;
+            width: 300px;
+        }
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress {
+            height: 25px;
+            margin-top: 1rem;
+            background: rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+        .progress-bar {
+            background-color: #3498db;
+        }
+        .progress-text {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            line-height: 25px;
+            color: white;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        .loading-steps {
+            text-align: left;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+        .loading-step {
+            margin-bottom: 0.5rem;
+            opacity: 0.5;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .loading-step.active {
+            opacity: 1;
+            font-weight: bold;
+        }
+        .step-percentage {
+            font-size: 0.8rem;
+            color: #666;
+        }
+        .loading-step.active .step-percentage {
+            color: #3498db;
+        }
+    </style>
+</head>
+<body>
+    <div id="info" class="alert alert-info d-none">
+        <i class="bi bi-info-circle"></i> Tap "Enter AR" to start
+    </div>
+    <button id="enter-ar" class="btn btn-primary">
+        <i class="bi bi-camera-video"></i> Enter AR
+    </button>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <h4>Loading AR Model</h4>
+            <div class="progress">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%">
+                    <span class="progress-text">0%</span>
+                </div>
+            </div>
+            <div class="loading-steps">
+                <div class="loading-step" id="step1">
+                    <span>Initializing AR...</span>
+                    <span class="step-percentage">0%</span>
+                </div>
+                <div class="loading-step" id="step2">
+                    <span>Loading 3D model...</span>
+                    <span class="step-percentage">0%</span>
+                </div>
+                <div class="loading-step" id="step3">
+                    <span>Preparing AR environment...</span>
+                    <span class="step-percentage">0%</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.module.js';
+        import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.132.2/examples/jsm/loaders/GLTFLoader.js';
+        import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.132.2/examples/jsm/webxr/ARButton.js';
+
+        let camera, scene, renderer;
+        let model;
+        let controller;
+        let reticle;
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const info = document.getElementById('info');
+        const progressBar = document.querySelector('.progress-bar');
+        const progressText = document.querySelector('.progress-text');
+        const steps = document.querySelectorAll('.loading-step');
+        const stepPercentages = document.querySelectorAll('.step-percentage');
+
+        function updateProgress(step, progress) {
+            // Update overall progress
+            progressBar.style.width = `${progress}%`;
+            progressText.textContent = `${progress}%`;
+
+            // Update step progress
+            steps.forEach((s, i) => {
+                if (i < step) {
+                    s.classList.add('active');
+                    stepPercentages[i].textContent = '100%';
+                } else if (i === step) {
+                    s.classList.add('active');
+                    const stepProgress = Math.min(100, Math.max(0, progress - (i * 33)));
+                    stepPercentages[i].textContent = `${stepProgress}%`;
+                } else {
+                    s.classList.remove('active');
+                    stepPercentages[i].textContent = '0%';
+                }
+            });
+        }
+
+        init();
+        animate();
+
+        function init() {
+            updateProgress(0, 0);
+            
+            // Create scene
+            scene = new THREE.Scene();
+            updateProgress(0, 20);
+
+            // Create camera
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+            updateProgress(0, 40);
+
+            // Create renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            updateProgress(0, 60);
+
+            // Add AR button
+            document.body.appendChild(ARButton.createButton(renderer, {
+                requiredFeatures: ['hit-test'],
+                optionalFeatures: ['dom-overlay'],
+                domOverlay: { root: document.body }
+            }));
+            updateProgress(1, 80);
+
+            // Create controller
+            controller = renderer.xr.getController(0);
+            controller.addEventListener('select', onSelect);
+            scene.add(controller);
+
+            // Create reticle
+            reticle = new THREE.Mesh(
+                new THREE.RingGeometry(0.03, 0.04, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial()
+            );
+            reticle.matrixAutoUpdate = false;
+            reticle.visible = false;
+            scene.add(reticle);
+
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize);
+
+            // Load the 3D model
+            const loader = new GLTFLoader();
+            updateProgress(2, 90);
+            
+            loader.load('{{ model_path }}', 
+                function (gltf) {
+                    model = gltf.scene;
+                    model.scale.set(0.1, 0.1, 0.1);
+                    model.visible = false;
+                    scene.add(model);
+                    updateProgress(3, 100);
+                    setTimeout(() => {
+                        loadingOverlay.style.display = 'none';
+                        info.classList.remove('d-none');
+                    }, 500);
+                },
+                function (xhr) {
+                    const progress = 90 + (xhr.loaded / xhr.total * 10);
+                    updateProgress(2, progress);
+                },
+                function (error) {
+                    console.error('An error happened', error);
+                    loadingOverlay.style.display = 'none';
+                    info.classList.remove('d-none');
+                    info.classList.remove('alert-info');
+                    info.classList.add('alert-danger');
+                    info.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Error loading model. Please try again.';
+                }
+            );
+        }
+
+        function onSelect() {
+            if (reticle.visible) {
+                const clone = model.clone();
+                clone.position.setFromMatrixPosition(reticle.matrix);
+                clone.visible = true;
+                scene.add(clone);
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+
+        function render(timestamp, frame) {
+            if (frame) {
+                const referenceSpace = renderer.xr.getReferenceSpace();
+                const session = renderer.xr.getSession();
+                
+                if (session) {
+                    const hitTestSource = session.requestHitTestSource({ space: referenceSpace });
+                    const hitTestResults = frame.getHitTestResults(hitTestSource);
+                    
+                    if (hitTestResults.length > 0) {
+                        const hit = hitTestResults[0];
+                        const pose = hit.getPose(referenceSpace);
+                        
+                        reticle.visible = true;
+                        reticle.matrix.fromArray(pose.transform.matrix);
+                    } else {
+                        reticle.visible = false;
+                    }
+                }
+            }
+            
+            renderer.render(scene, camera);
+        }
+    </script>
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html> 
